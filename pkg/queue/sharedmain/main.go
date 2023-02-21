@@ -242,7 +242,7 @@ func Main(opts ...Option) error {
 	// Enable TLS when certificate is mounted.
 	tlsEnabled := exists(logger, certPath) && exists(logger, keyPath)
 
-	mainServer, drainer := buildServer(d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
+	mainServer, drainer := buildServer([]string{net.JoinHostPort("127.0.0.1", env.UserPort), net.JoinHostPort("127.0.0.1", "8081")}, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
 	httpServers := map[string]*http.Server{
 		"main":    mainServer,
 		"metrics": buildMetricsServer(protoStatReporter),
@@ -257,7 +257,7 @@ func Main(opts ...Option) error {
 	// See also https://github.com/knative/serving/issues/12808.
 	var tlsServers map[string]*http.Server
 	if tlsEnabled {
-		mainTLSServer, drainer := buildServer(d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, true /* enable TLS */)
+		mainTLSServer, drainer := buildServer([]string{net.JoinHostPort("127.0.0.1", env.UserPort)}, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, true /* enable TLS */)
 		tlsServers = map[string]*http.Server{
 			"tlsMain":  mainTLSServer,
 			"tlsAdmin": buildAdminServer(d.Ctx, logger, drainer),
@@ -278,6 +278,41 @@ func Main(opts ...Option) error {
 			}
 		}(name, server)
 	}
+
+	// test mutiple port ------------------------------------------------------
+
+	// httpProxy := pkghttp.NewHeaderPruningReverseProxy(net.JoinHostPort("127.0.0.1", "8081"), pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
+	// httpProxy.Transport = d.Transport
+	// httpProxy.ErrorHandler = pkghandler.Error(logger)
+	// httpProxy.BufferPool = netproxy.NewBufferPool()
+	// httpProxy.FlushInterval = netproxy.FlushInterval
+
+	// var composedHandler http.Handler = httpProxy
+	// httpserver2 := pkgnet.NewServer(":"+env.QueueServingPort, composedHandler)
+	// go func(name string, s *http.Server) {
+	// 	if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// 		errCh <- fmt.Errorf("%s server failed to serve: %w", name, err)
+	// 	}
+	// }("main2", httpserver2)
+	// mainServer2, _ := buildServer(net.JoinHostPort("127.0.0.1", "8081"), d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
+	// httpServers2 := map[string]*http.Server{
+	// 	"main2": mainServer2,
+	// 	// "metrics": buildMetricsServer(protoStatReporter),
+	// 	// "admin":   buildAdminServer(d.Ctx, logger, drainer),
+	// }
+	// // if env.EnableProfiling {
+	// // 	httpServers["profile"] = profiling.NewServer(profiling.NewHandler(logger, true))
+	// // }
+	// for name, server := range httpServers2 {
+	// 	go func(name string, s *http.Server) {
+	// 		// Don't forward ErrServerClosed as that indicates we're already shutting down.
+	// 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// 			errCh <- fmt.Errorf("%s server failed to serve: %w", name, err)
+	// 		}
+	// 	}(name, server)
+	// }
+	// ------------------------------------------------------------------------
+
 	for name, server := range tlsServers {
 		go func(name string, s *http.Server) {
 			// Don't forward ErrServerClosed as that indicates we're already shutting down.
@@ -335,11 +370,11 @@ func buildProbe(logger *zap.SugaredLogger, encodedProbe string, autodetectHTTP2 
 	return readiness.NewProbe(coreProbe)
 }
 
-func buildServer(ctx context.Context, env config, transport http.RoundTripper, probeContainer func() bool, stats *netstats.RequestStats, logger *zap.SugaredLogger,
+func buildServer(target []string, ctx context.Context, env config, transport http.RoundTripper, probeContainer func() bool, stats *netstats.RequestStats, logger *zap.SugaredLogger,
 	ce *queue.ConcurrencyEndpoint, enableTLS bool) (*http.Server, *pkghandler.Drainer) {
 	// TODO: If TLS is enabled, execute probes twice and tracking two different sets of container health.
 
-	target := net.JoinHostPort("127.0.0.1", env.UserPort)
+	// target := [net.JoinHostPort("127.0.0.1", env.UserPort), net.JoinHostPort("127.0.0.1", "8080")]
 
 	httpProxy := pkghttp.NewHeaderPruningReverseProxy(target, pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
 	httpProxy.Transport = transport
