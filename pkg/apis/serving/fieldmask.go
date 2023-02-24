@@ -182,6 +182,7 @@ func PodSpecMask(ctx context.Context, in *corev1.PodSpec) *corev1.PodSpec {
 	out.Volumes = in.Volumes
 	out.ImagePullSecrets = in.ImagePullSecrets
 	out.EnableServiceLinks = in.EnableServiceLinks
+	out.ShareProcessNamespace = in.ShareProcessNamespace
 	// Only allow setting AutomountServiceAccountToken to false
 	if in.AutomountServiceAccountToken != nil && !*in.AutomountServiceAccountToken {
 		out.AutomountServiceAccountToken = in.AutomountServiceAccountToken
@@ -234,7 +235,7 @@ func PodSpecMask(ctx context.Context, in *corev1.PodSpec) *corev1.PodSpec {
 	out.HostNetwork = false
 	out.HostPID = false
 	out.HostIPC = false
-	out.ShareProcessNamespace = nil
+	// out.ShareProcessNamespace = nil
 	out.Hostname = ""
 	out.Subdomain = ""
 	out.Priority = nil

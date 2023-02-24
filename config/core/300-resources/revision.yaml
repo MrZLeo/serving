@@ -555,6 +555,9 @@ spec:
                 serviceAccountName:
                   description: 'ServiceAccountName is the name of the ServiceAccount to use to run this pod. More info: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/'
                   type: string
+                shareProcessNamespace:
+                  description: 'Share a single process namespace between all of the containers in a pod. When this is set containers will be able to view and signal processes from other containers in the same pod, and the first process in each container will not be assigned PID 1. HostPID and ShareProcessNamespace cannot both be set. Optional: Default to false.'
+                  type: boolean
                 timeoutSeconds:
                   description: TimeoutSeconds is the maximum duration in seconds that the request instance is allowed to respond to a request. If unspecified, a system default will be provided.
                   type: integer
