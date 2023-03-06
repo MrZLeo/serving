@@ -241,8 +241,19 @@ func Main(opts ...Option) error {
 
 	// Enable TLS when certificate is mounted.
 	tlsEnabled := exists(logger, certPath) && exists(logger, keyPath)
+	target_url := []string{
+		net.JoinHostPort("127.0.0.1", env.UserPort),
+		net.JoinHostPort("127.0.0.1", "8081"),
+		net.JoinHostPort("127.0.0.1", "8082"),
+		net.JoinHostPort("127.0.0.1", "8083"),
+		net.JoinHostPort("127.0.0.1", "8084"),
+		net.JoinHostPort("127.0.0.1", "8085"),
+		net.JoinHostPort("127.0.0.1", "8086"),
+		net.JoinHostPort("127.0.0.1", "8087"),
+		net.JoinHostPort("127.0.0.1", "8088"),
+	}
 
-	mainServer, drainer := buildServer([]string{net.JoinHostPort("127.0.0.1", env.UserPort), net.JoinHostPort("127.0.0.1", "8081")}, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
+	mainServer, drainer := buildServer(target_url, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
 	httpServers := map[string]*http.Server{
 		"main":    mainServer,
 		"metrics": buildMetricsServer(protoStatReporter),
