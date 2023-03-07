@@ -251,6 +251,8 @@ func Main(opts ...Option) error {
 		net.JoinHostPort("127.0.0.1", "8086"),
 		net.JoinHostPort("127.0.0.1", "8087"),
 		net.JoinHostPort("127.0.0.1", "8088"),
+		net.JoinHostPort("127.0.0.1", "8089"),
+		net.JoinHostPort("127.0.0.1", "8090"),
 	}
 
 	mainServer, drainer := buildServer(target_url, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
