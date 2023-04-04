@@ -17,7 +17,6 @@ limitations under the License.
 package http
 
 import (
-	"math/rand"
 	"net/http"
 	"net/http/httputil"
 
@@ -33,7 +32,7 @@ const NoHostOverride = ""
 // If hostOverride is not an empty string, the outgoing request's Host header will be
 // replaced with that explicit value and the passthrough loadbalancing header will be
 // set to enable pod-addressability.
-func NewHeaderPruningReverseProxy(target []string, hostOverride string, headersToRemove []string, useHTTPS bool) *httputil.ReverseProxy {
+func NewHeaderPruningReverseProxy(target string, hostOverride string, headersToRemove []string, useHTTPS bool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			if useHTTPS {
@@ -43,7 +42,7 @@ func NewHeaderPruningReverseProxy(target []string, hostOverride string, headersT
 			}
 
 			// TODO: find a better way to use multiple port, i.e. multiple user-container
-			req.URL.Host = target[rand.Int()%len(target)]
+			req.URL.Host = target
 
 			if hostOverride != NoHostOverride {
 				req.Host = hostOverride

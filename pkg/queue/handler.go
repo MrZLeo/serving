@@ -17,9 +17,14 @@ limitations under the License.
 package queue
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"net/http"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"go.opencensus.io/trace"
@@ -28,10 +33,74 @@ import (
 	"knative.dev/serving/pkg/activator"
 )
 
+var heapMutex sync.Mutex
+
+type BreakerHeap []struct {
+	*Breaker
+	http.Handler
+}
+
+func (h BreakerHeap) Len() int {
+	return len(h)
+}
+
+func (h BreakerHeap) Less(i, j int) bool {
+	heapMutex.Lock()
+	defer heapMutex.Unlock()
+
+	old := h[i].sem.state.Load()
+	_, left := unpack(old)
+
+	old = h[i].sem.state.Load()
+	_, right := unpack(old)
+
+	return left < right
+}
+
+func (h BreakerHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *BreakerHeap) Push(x interface{}) {
+	heapMutex.Lock()
+	*h = append(*h, x.(struct {
+		*Breaker
+		http.Handler
+	}))
+	heapMutex.Unlock()
+}
+
+func (h *BreakerHeap) Pop() interface{} {
+	heapMutex.Lock()
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	heapMutex.Unlock()
+	return x
+}
+
 // ProxyHandler sends requests to the `next` handler at a rate controlled by
 // the passed `breaker`, while recording stats to `stats`.
-func ProxyHandler(breaker *Breaker, stats *netstats.RequestStats, tracingEnabled bool, next http.Handler) http.HandlerFunc {
+func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnabled bool, next []http.Handler) http.HandlerFunc {
+	// TODO: finish heap design here to build a multi-thread queue
+	breakerHeap := &BreakerHeap{}
+	// SAFETY: breakers.len() == next.len()
+	for i := 0; i < len(breakers); i++ {
+		*breakerHeap = append(*breakerHeap, struct {
+			*Breaker
+			http.Handler
+		}{breakers[i], next[i]})
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		// choose the min loaded breaker
+		heapEntry := heap.Pop(breakerHeap).(struct {
+			*Breaker
+			http.Handler
+		})
+		breaker, next := heapEntry.Breaker, heapEntry.Handler
+
 		if netheader.IsKubeletProbe(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -75,5 +144,32 @@ func ProxyHandler(breaker *Breaker, stats *netstats.RequestStats, tracingEnabled
 		} else {
 			next.ServeHTTP(w, r)
 		}
+
+		// put back to heap
+		heap.Push(breakerHeap, struct {
+			*Breaker
+			http.Handler
+		}{breaker, next})
 	}
+}
+
+// WARN: use ps to find base process, DON'T USE IT IN YOUR PRODUCTION
+func InstanceAvailable() int {
+	cmd := exec.Command(
+		"bash",
+		"-c",
+		"ps aux | grep \"python3 daemon-loop.py\" | grep -v \"grep\" | wc -l",
+	)
+
+	out, _ := cmd.Output()
+
+	// trim
+	output := string(out)
+	output = strings.TrimRightFunc(output, func(r rune) bool {
+		return r == '\n' || r == ' '
+	})
+
+	res, _ := strconv.Atoi(output)
+
+	return res
 }

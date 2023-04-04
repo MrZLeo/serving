@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"strconv"
 	"time"
@@ -244,15 +245,20 @@ func Main(opts ...Option) error {
 	target_url := []string{
 		net.JoinHostPort("127.0.0.1", env.UserPort),
 		net.JoinHostPort("127.0.0.1", "8081"),
-		net.JoinHostPort("127.0.0.1", "8082"),
-		net.JoinHostPort("127.0.0.1", "8083"),
-		net.JoinHostPort("127.0.0.1", "8084"),
-		net.JoinHostPort("127.0.0.1", "8085"),
-		net.JoinHostPort("127.0.0.1", "8086"),
-		net.JoinHostPort("127.0.0.1", "8087"),
-		net.JoinHostPort("127.0.0.1", "8088"),
-		net.JoinHostPort("127.0.0.1", "8089"),
-		net.JoinHostPort("127.0.0.1", "8090"),
+		// net.JoinHostPort("127.0.0.1", "8082"),
+		// net.JoinHostPort("127.0.0.1", "8083"),
+		// net.JoinHostPort("127.0.0.1", "8084"),
+		// net.JoinHostPort("127.0.0.1", "8085"),
+		// net.JoinHostPort("127.0.0.1", "8086"),
+		// net.JoinHostPort("127.0.0.1", "8087"),
+		// net.JoinHostPort("127.0.0.1", "8088"),
+		// net.JoinHostPort("127.0.0.1", "8089"),
+		// net.JoinHostPort("127.0.0.1", "8090"),
+		// net.JoinHostPort("127.0.0.1", "8091"),
+		// net.JoinHostPort("127.0.0.1", "8092"),
+		// net.JoinHostPort("127.0.0.1", "8093"),
+		// net.JoinHostPort("127.0.0.1", "8094"),
+		// net.JoinHostPort("127.0.0.1", "8095"),
 	}
 
 	mainServer, drainer := buildServer(target_url, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
@@ -387,16 +393,29 @@ func buildServer(target []string, ctx context.Context, env config, transport htt
 	ce *queue.ConcurrencyEndpoint, enableTLS bool) (*http.Server, *pkghandler.Drainer) {
 	// TODO: If TLS is enabled, execute probes twice and tracking two different sets of container health.
 
-	// target := [net.JoinHostPort("127.0.0.1", env.UserPort), net.JoinHostPort("127.0.0.1", "8080")]
-
-	httpProxy := pkghttp.NewHeaderPruningReverseProxy(target, pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
-	httpProxy.Transport = transport
-	httpProxy.ErrorHandler = pkghandler.Error(logger)
-	httpProxy.BufferPool = netproxy.NewBufferPool()
-	httpProxy.FlushInterval = netproxy.FlushInterval
+	httpProxies := func(size int) []*httputil.ReverseProxy {
+		httpPrexies := &[]*httputil.ReverseProxy{}
+		for i := size - 1; i >= 0; i-- {
+			httpProxy := pkghttp.NewHeaderPruningReverseProxy(target[i], pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
+			httpProxy.Transport = transport
+			httpProxy.ErrorHandler = pkghandler.Error(logger)
+			httpProxy.BufferPool = netproxy.NewBufferPool()
+			httpProxy.FlushInterval = netproxy.FlushInterval
+			*httpPrexies = append(*httpPrexies, httpProxy)
+		}
+		return *httpPrexies
+	}(len(target))
 
 	// TODO: During HTTP and HTTPS transition, counting concurrency could not be accurate. Count accurately.
-	breaker := buildBreaker(logger, env)
+	breakers := func(size int) []*queue.Breaker {
+		breakers := &[]*queue.Breaker{}
+		for i := 0; i < size; i++ {
+			breaker := buildBreaker(logger, env)
+			*breakers = append(*breakers, breaker)
+		}
+		return *breakers
+	}(len(target))
+
 	metricsSupported := supportsMetrics(ctx, logger, env, enableTLS)
 	tracingEnabled := env.TracingConfigBackend != tracingconfig.None
 	concurrencyStateEnabled := env.ConcurrencyStateEndpoint != ""
@@ -409,24 +428,42 @@ func buildServer(target []string, ctx context.Context, env config, transport htt
 	if env.RevisionIdleTimeoutSeconds != 0 {
 		idleTimeout = time.Duration(env.RevisionIdleTimeoutSeconds) * time.Second
 	}
+
 	// Create queue handler chain.
 	// Note: innermost handlers are specified first, ie. the last handler in the chain will be executed first.
-	var composedHandler http.Handler = httpProxy
-	if concurrencyStateEnabled {
-		logger.Info("Concurrency state endpoint set, tracking request counts, using endpoint: ", ce.Endpoint())
-		go func() {
-			for range time.NewTicker(1 * time.Minute).C {
-				ce.RefreshToken()
+	//
+	// multiple handler
+	// http-server -> proxyHandler -> breakers[0] -> reverseProxy[0]
+	//                          |
+	//                          ----> breakers[1] -> reverseProxy[1]
+	//                          |
+	//                          ----> breakers[2] -> reverseProxy[2]
+	//                          ...
+	//
+	composedHandler := func(size int) http.Handler {
+		composedHandlers := &[]http.Handler{}
+		for i := 0; i < size; i++ {
+			var composedHandler http.Handler = httpProxies[i]
+			if concurrencyStateEnabled {
+				logger.Info("Concurrency state endpoint set, tracking request counts, using endpoint: ", ce.Endpoint())
+				go func() {
+					for range time.NewTicker(1 * time.Minute).C {
+						ce.RefreshToken()
+					}
+				}()
+				composedHandler = queue.ConcurrencyStateHandler(logger, composedHandler, ce.Pause, ce.Resume)
+				// start paused
+				ce.Pause(logger)
 			}
-		}()
-		composedHandler = queue.ConcurrencyStateHandler(logger, composedHandler, ce.Pause, ce.Resume)
-		// start paused
-		ce.Pause(logger)
-	}
-	if metricsSupported {
-		composedHandler = requestAppMetricsHandler(logger, composedHandler, breaker, env)
-	}
-	composedHandler = queue.ProxyHandler(breaker, stats, tracingEnabled, composedHandler)
+			if metricsSupported {
+				composedHandler = requestAppMetricsHandler(logger, composedHandler, breakers[i], env)
+			}
+			*composedHandlers = append(*composedHandlers, composedHandler)
+		}
+
+		return queue.ProxyHandler(breakers, stats, tracingEnabled, *composedHandlers)
+	}(len(target))
+
 	composedHandler = queue.ForwardedShimHandler(composedHandler)
 	composedHandler = handler.NewTimeoutHandler(composedHandler, "request timeout", func(r *http.Request) (time.Duration, time.Duration, time.Duration) {
 		return timeout, responseStartTimeout, idleTimeout

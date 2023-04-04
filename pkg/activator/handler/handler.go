@@ -125,9 +125,9 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 
 	var proxy *httputil.ReverseProxy
 	if a.tls {
-		proxy = pkghttp.NewHeaderPruningReverseProxy([]string{useSecurePort(target)}, hostOverride, activator.RevisionHeaders, true /* uss HTTPS */)
+		proxy = pkghttp.NewHeaderPruningReverseProxy(useSecurePort(target), hostOverride, activator.RevisionHeaders, true /* uss HTTPS */)
 	} else {
-		proxy = pkghttp.NewHeaderPruningReverseProxy([]string{target}, hostOverride, activator.RevisionHeaders, false /* use HTTPS */)
+		proxy = pkghttp.NewHeaderPruningReverseProxy(target, hostOverride, activator.RevisionHeaders, false /* use HTTPS */)
 	}
 
 	proxy.BufferPool = a.bufferPool

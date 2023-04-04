@@ -87,7 +87,7 @@ func TestNewHeaderPruningProxy(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			proxy := NewHeaderPruningReverseProxy([]string{serverURL.Host}, test.host, []string{
+			proxy := NewHeaderPruningReverseProxy(serverURL.Host, test.host, []string{
 				"header-to-remove-1",
 				"header-to-remove-2",
 			}, false /* use HTTPS */)
@@ -178,7 +178,7 @@ func TestNewHeaderPruningProxyHTTPS(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			proxy := NewHeaderPruningReverseProxy([]string{serverURL.Host}, test.host, []string{
+			proxy := NewHeaderPruningReverseProxy(serverURL.Host, test.host, []string{
 				"header-to-remove-1",
 				"header-to-remove-2",
 			}, true /* use HTTPS */)
