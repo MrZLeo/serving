@@ -58,14 +58,14 @@ func (h HandlerVec) GetEntry() (*Breaker, http.Handler) {
 // the passed `breaker`, while recording stats to `stats`.
 func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnabled bool, next []http.Handler) http.HandlerFunc {
 	// SAFETY: breakers.len() == next.len()
-	handlerEntrys := &[]HandlerEntry{}
+	handlerEntrys := make([]HandlerEntry, len(breakers))
 	for i := 0; i < len(breakers); i++ {
-		*handlerEntrys = append(*handlerEntrys, HandlerEntry{
+		handlerEntrys[i] = HandlerEntry{
 			breaker: breakers[i],
 			handler: next[i],
-		})
+		}
 	}
-	handlerVec := HandlerVec{entrys: *handlerEntrys}
+	handlerVec := HandlerVec{entrys: handlerEntrys}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// choose a instance to serve request
