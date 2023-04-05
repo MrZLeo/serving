@@ -242,26 +242,18 @@ func Main(opts ...Option) error {
 
 	// Enable TLS when certificate is mounted.
 	tlsEnabled := exists(logger, certPath) && exists(logger, keyPath)
-	target_url := []string{
-		net.JoinHostPort("127.0.0.1", env.UserPort),
-		net.JoinHostPort("127.0.0.1", "8081"),
-		// net.JoinHostPort("127.0.0.1", "8082"),
-		// net.JoinHostPort("127.0.0.1", "8083"),
-		// net.JoinHostPort("127.0.0.1", "8084"),
-		// net.JoinHostPort("127.0.0.1", "8085"),
-		// net.JoinHostPort("127.0.0.1", "8086"),
-		// net.JoinHostPort("127.0.0.1", "8087"),
-		// net.JoinHostPort("127.0.0.1", "8088"),
-		// net.JoinHostPort("127.0.0.1", "8089"),
-		// net.JoinHostPort("127.0.0.1", "8090"),
-		// net.JoinHostPort("127.0.0.1", "8091"),
-		// net.JoinHostPort("127.0.0.1", "8092"),
-		// net.JoinHostPort("127.0.0.1", "8093"),
-		// net.JoinHostPort("127.0.0.1", "8094"),
-		// net.JoinHostPort("127.0.0.1", "8095"),
-	}
 
-	mainServer, drainer := buildServer(target_url, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
+	// multi port support
+	targetUrl := func(numPorts int) []string {
+		targetUrl := make([]string, numPorts)
+		startPort, _ := strconv.Atoi(env.UserPort)
+		for i := 0; i < numPorts; i++ {
+			targetUrl[i] = net.JoinHostPort("127.0.0.1", strconv.Itoa(startPort+i))
+		}
+		return targetUrl
+	}(16)
+
+	mainServer, drainer := buildServer(targetUrl, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
 	httpServers := map[string]*http.Server{
 		"main":    mainServer,
 		"metrics": buildMetricsServer(protoStatReporter),
@@ -297,40 +289,6 @@ func Main(opts ...Option) error {
 			}
 		}(name, server)
 	}
-
-	// test mutiple port ------------------------------------------------------
-
-	// httpProxy := pkghttp.NewHeaderPruningReverseProxy(net.JoinHostPort("127.0.0.1", "8081"), pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
-	// httpProxy.Transport = d.Transport
-	// httpProxy.ErrorHandler = pkghandler.Error(logger)
-	// httpProxy.BufferPool = netproxy.NewBufferPool()
-	// httpProxy.FlushInterval = netproxy.FlushInterval
-
-	// var composedHandler http.Handler = httpProxy
-	// httpserver2 := pkgnet.NewServer(":"+env.QueueServingPort, composedHandler)
-	// go func(name string, s *http.Server) {
-	// 	if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-	// 		errCh <- fmt.Errorf("%s server failed to serve: %w", name, err)
-	// 	}
-	// }("main2", httpserver2)
-	// mainServer2, _ := buildServer(net.JoinHostPort("127.0.0.1", "8081"), d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
-	// httpServers2 := map[string]*http.Server{
-	// 	"main2": mainServer2,
-	// 	// "metrics": buildMetricsServer(protoStatReporter),
-	// 	// "admin":   buildAdminServer(d.Ctx, logger, drainer),
-	// }
-	// // if env.EnableProfiling {
-	// // 	httpServers["profile"] = profiling.NewServer(profiling.NewHandler(logger, true))
-	// // }
-	// for name, server := range httpServers2 {
-	// 	go func(name string, s *http.Server) {
-	// 		// Don't forward ErrServerClosed as that indicates we're already shutting down.
-	// 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-	// 			errCh <- fmt.Errorf("%s server failed to serve: %w", name, err)
-	// 		}
-	// 	}(name, server)
-	// }
-	// ------------------------------------------------------------------------
 
 	for name, server := range tlsServers {
 		go func(name string, s *http.Server) {
@@ -395,7 +353,7 @@ func buildServer(target []string, ctx context.Context, env config, transport htt
 
 	httpProxies := func(size int) []*httputil.ReverseProxy {
 		httpPrexies := &[]*httputil.ReverseProxy{}
-		for i := size - 1; i >= 0; i-- {
+		for i := 0; i < size; i++ {
 			httpProxy := pkghttp.NewHeaderPruningReverseProxy(target[i], pkghttp.NoHostOverride, activator.RevisionHeaders, false /* use HTTP */)
 			httpProxy.Transport = transport
 			httpProxy.ErrorHandler = pkghandler.Error(logger)

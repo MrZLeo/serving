@@ -17,14 +17,14 @@ limitations under the License.
 package queue
 
 import (
-	"container/heap"
 	"context"
 	"errors"
+	"math/rand"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opencensus.io/trace"
@@ -33,73 +33,43 @@ import (
 	"knative.dev/serving/pkg/activator"
 )
 
-var heapMutex sync.Mutex
+// TODO: use a goroutine to check the size of instance periodically, for now just set to 2
+var instances int32 = 2
 
-type BreakerHeap []struct {
-	*Breaker
-	http.Handler
+type HandlerEntry struct {
+	breaker *Breaker
+	handler http.Handler
 }
 
-func (h BreakerHeap) Len() int {
-	return len(h)
+type HandlerVec struct {
+	entrys []HandlerEntry
 }
 
-func (h BreakerHeap) Less(i, j int) bool {
-	heapMutex.Lock()
-	defer heapMutex.Unlock()
+func (h HandlerVec) GetEntry() (*Breaker, http.Handler) {
+	// use random number to decide which instance to go
+	len := atomic.LoadInt32(&instances)
+	i := rand.Int31n(len)
 
-	old := h[i].sem.state.Load()
-	_, left := unpack(old)
-
-	old = h[i].sem.state.Load()
-	_, right := unpack(old)
-
-	return left < right
-}
-
-func (h BreakerHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *BreakerHeap) Push(x interface{}) {
-	heapMutex.Lock()
-	*h = append(*h, x.(struct {
-		*Breaker
-		http.Handler
-	}))
-	heapMutex.Unlock()
-}
-
-func (h *BreakerHeap) Pop() interface{} {
-	heapMutex.Lock()
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	heapMutex.Unlock()
-	return x
+	entry := h.entrys[i]
+	return entry.breaker, entry.handler
 }
 
 // ProxyHandler sends requests to the `next` handler at a rate controlled by
 // the passed `breaker`, while recording stats to `stats`.
 func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnabled bool, next []http.Handler) http.HandlerFunc {
-	// TODO: finish heap design here to build a multi-thread queue
-	breakerHeap := &BreakerHeap{}
 	// SAFETY: breakers.len() == next.len()
+	handlerEntrys := &[]HandlerEntry{}
 	for i := 0; i < len(breakers); i++ {
-		*breakerHeap = append(*breakerHeap, struct {
-			*Breaker
-			http.Handler
-		}{breakers[i], next[i]})
+		*handlerEntrys = append(*handlerEntrys, HandlerEntry{
+			breaker: breakers[i],
+			handler: next[i],
+		})
 	}
+	handlerVec := HandlerVec{entrys: *handlerEntrys}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// choose the min loaded breaker
-		heapEntry := heap.Pop(breakerHeap).(struct {
-			*Breaker
-			http.Handler
-		})
-		breaker, next := heapEntry.Breaker, heapEntry.Handler
+		// choose a instance to serve request
+		breaker, next := handlerVec.GetEntry()
 
 		if netheader.IsKubeletProbe(r) {
 			next.ServeHTTP(w, r)
@@ -144,12 +114,6 @@ func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnab
 		} else {
 			next.ServeHTTP(w, r)
 		}
-
-		// put back to heap
-		heap.Push(breakerHeap, struct {
-			*Breaker
-			http.Handler
-		}{breaker, next})
 	}
 }
 
