@@ -32,7 +32,6 @@ import (
 	"knative.dev/serving/pkg/activator"
 )
 
-// TODO: use a goroutine to check the size of instance periodically, for now just set to 2
 var instances int32 = 1
 
 type HandlerEntry struct {
@@ -46,7 +45,7 @@ type HandlerVec struct {
 
 func (h HandlerVec) GetEntry() (*Breaker, http.Handler) {
 	// use random number to decide which instance to go
-	// SAFETY: len < len(h.entrys), default = 16
+	// SAFETY: len < len(h.entrys)
 	len := atomic.LoadInt32(&instances)
 	i := rand.Int31n(len)
 
@@ -68,15 +67,15 @@ func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnab
 	handlerVec := HandlerVec{entrys: handlerEntrys}
 
 	// timer to check size of instances
-	const TIME_INTERVAL = 10 * time.Second
+	const TIME_INTERVAL = 500 * time.Millisecond
 	ticker := time.NewTicker(TIME_INTERVAL)
 
 	go func() {
 		for range ticker.C {
 			// adjust the size of instance
-			newSize := InstanceAvailable()
+			newSize := InstanceAvailable(len(breakers))
 			atomic.StoreInt32(&instances, newSize)
-			// fmt.Printf("set new size: %d\n", newSize)
+			fmt.Printf("set new size: %d\n", newSize)
 		}
 	}()
 
@@ -131,27 +130,10 @@ func ProxyHandler(breakers []*Breaker, stats *netstats.RequestStats, tracingEnab
 }
 
 // WARN: use ps to find base process, DON'T USE IT IN YOUR PRODUCTION
-func InstanceAvailable() int32 {
-	// cmd := exec.Command(
-	// 	"bash",
-	// 	"-c",
-	// 	"ps aux | grep \"python3 daemon-loop.py\" | grep -v \"grep\" | wc -l",
-	// )
-
-	// out, _ := cmd.Output()
-
-	// // trim
-	// output := string(out)
-	// output = strings.TrimRightFunc(output, func(r rune) bool {
-	// 	return r == '\n' || r == ' '
-	// })
-
-	// res, _ := strconv.Atoi(output)
-
-	// return res
+func InstanceAvailable(size int) int32 {
 
 	const START_PORT int = 8080
-	const END_PORT int = 8095
+	END_PORT := START_PORT + size
 	cnt := 0
 	for port := START_PORT; port <= END_PORT; port++ {
 		addr := fmt.Sprintf(":%d", port)

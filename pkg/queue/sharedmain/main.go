@@ -251,7 +251,7 @@ func Main(opts ...Option) error {
 			targetUrl[i] = net.JoinHostPort("127.0.0.1", strconv.Itoa(startPort+i))
 		}
 		return targetUrl
-	}(16)
+	}(128)
 
 	mainServer, drainer := buildServer(targetUrl, d.Ctx, env, d.Transport, probe, stats, logger, concurrencyendpoint, false)
 	httpServers := map[string]*http.Server{
